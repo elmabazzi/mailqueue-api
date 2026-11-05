@@ -16,9 +16,14 @@
     "lint:arch": "depcruise src --config .dependency-cruiser.cjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "migrate": "node-pg-migrate --migrations-dir migrations --migration-file-language sql --check-order up",
+    "migrate:down": "node-pg-migrate --migrations-dir migrations --migration-file-language sql --check-order down",
+    "migrate:create": "node-pg-migrate --migrations-dir migrations --migration-file-language sql --check-order create",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "npm run typecheck && npm run lint && npm run lint:arch && npm run format:check && npm test"
+    "check": "npm run typecheck && npm run lint && npm run lint:arch && npm run format:check && npm test",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration"
   },
   "dependencies": {
     "dotenv": "18.0.9",
