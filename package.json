@@ -10,7 +10,11 @@
     "node": ">=22.12.0"
   },
   "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "dev:worker": "tsx watch src/worker.ts",
     "build": "tsc -p tsconfig.build.json",
+    "start": "node --enable-source-maps dist/server.js",
+    "start:worker": "node --enable-source-maps dist/worker.js",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint .",
     "lint:arch": "depcruise src --config .dependency-cruiser.cjs",
@@ -23,7 +27,8 @@
     "test:watch": "vitest",
     "check": "npm run typecheck && npm run lint && npm run lint:arch && npm run format:check && npm test",
     "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration"
+    "test:integration": "vitest run --project integration",
+    "seed": "tsx scripts/seed.ts"
   },
   "dependencies": {
     "dotenv": "18.0.9",

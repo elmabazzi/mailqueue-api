@@ -25,6 +25,15 @@ export default defineConfig(
     },
   },
 
+  // Tests read untyped HTTP response bodies (supertest's res.body is `any`).
+  {
+    files: ['tests/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+    },
+  },
+
   // Plain JS config files are not part of the TypeScript project.
   {
     files: ['**/*.js', '**/*.cjs'],
