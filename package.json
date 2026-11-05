@@ -1,0 +1,50 @@
+{
+  "name": "mailqueue-api",
+  "version": "1.0.0",
+  "description": "MailQueue - email queue management API (Express, PostgreSQL, pg-boss, Resend)",
+  "private": true,
+  "type": "module",
+  "author": "Elma Abazi",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "lint:arch": "depcruise src --config .dependency-cruiser.cjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run typecheck && npm run lint && npm run lint:arch && npm run format:check && npm test"
+  },
+  "dependencies": {
+    "dotenv": "18.0.9",
+    "express": "5.3.0",
+    "node-pg-migrate": "9.0.0",
+    "pg": "8.23.1",
+    "pg-boss": "12.38.1",
+    "pino": "10.4.0",
+    "pino-http": "11.0.0",
+    "resend": "6.37.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/express": "5.0.6",
+    "@types/node": "22.20.5",
+    "@types/pg": "8.23.1",
+    "@types/supertest": "7.2.1",
+    "dependency-cruiser": "18.7.2",
+    "eslint": "10.14.0",
+    "eslint-config-prettier": "10.1.8",
+    "prettier": "3.9.10",
+    "supertest": "7.3.1",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.1.0"
+  }
+}
