@@ -1,0 +1,63 @@
+# Render Blueprint: creates the database, the API (web service) and the worker in one step.
+# Render dashboard -> New -> Blueprint -> select this repository.
+# Secrets marked `sync: false` are entered in the dashboard; they are never stored in git.
+
+databases:
+  - name: mailqueue-db
+    databaseName: mailqueue
+    user: mailqueue
+    plan: free
+    # Only Render services can connect (no access from the public internet).
+    ipAllowList: []
+
+services:
+  # ---------------- HTTP API ----------------
+  - type: web
+    name: mailqueue-api
+    runtime: node
+    plan: free
+    # --include=dev: TypeScript is a devDependency and is needed to build.
+    buildCommand: npm ci --include=dev && npm run build
+    # Apply pending database migrations, then start the API.
+    startCommand: npm run migrate && npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: '22'
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mailqueue-db
+          property: connectionString
+      - key: API_KEY
+        generateValue: true
+      - key: EMAIL_MAX_RETRIES
+        value: '3'
+      - key: EMAIL_RETRY_DELAY_SECONDS
+        value: '30'
+
+  # ---------------- Background worker ----------------
+  - type: worker
+    name: mailqueue-worker
+    runtime: node
+    plan: starter # background workers are not available on the free plan
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm run start:worker
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: '22'
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mailqueue-db
+          property: connectionString
+      - key: EMAIL_MAX_RETRIES
+        value: '3'
+      - key: EMAIL_RETRY_DELAY_SECONDS
+        value: '30'
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
