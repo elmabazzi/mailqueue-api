@@ -35,9 +35,28 @@ const BaseSchema = z.object({
   EMAIL_RETRY_DELAY_SECONDS: z.coerce.number().int().min(1).max(3600).default(10),
 });
 
+// Variables the email worker needs (in the worker process, or in the API with RUN_WORKER_IN_API).
+const resendApiKey = z.string().startsWith('re_', 'RESEND_API_KEY must start with "re_"');
+const emailFrom = z
+  .string()
+  .min(3)
+  .refine((value) => value.includes('@'), {
+    message: 'EMAIL_FROM must contain an email address, e.g. "MailQueue <onboarding@resend.dev>"',
+  });
+const workerConcurrency = z.coerce.number().int().min(1).max(20).default(2);
+
 const ApiSchema = BaseSchema.extend({
   PORT: port.default(3000),
   API_KEY: z.string().min(16, 'API_KEY must be at least 16 characters long').optional(),
+
+  // Run the email worker inside the API process too: one service instead of two
+  // (e.g. on Render's free plan, which has no background workers).
+  RUN_WORKER_IN_API: z
+    .stringbool({ error: 'RUN_WORKER_IN_API must be true or false' })
+    .default(false),
+  RESEND_API_KEY: resendApiKey.optional(),
+  EMAIL_FROM: emailFrom.optional(),
+  WORKER_CONCURRENCY: workerConcurrency,
 }).superRefine((env, ctx) => {
   if (env.NODE_ENV === 'production' && !env.API_KEY) {
     ctx.addIssue({
@@ -46,17 +65,23 @@ const ApiSchema = BaseSchema.extend({
       message: 'API_KEY is required in production so the email endpoints are not public',
     });
   }
+  if (env.RUN_WORKER_IN_API) {
+    for (const name of ['RESEND_API_KEY', 'EMAIL_FROM'] as const) {
+      if (!env[name]) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [name],
+          message: `${name} is required when RUN_WORKER_IN_API=true`,
+        });
+      }
+    }
+  }
 });
 
 const WorkerSchema = BaseSchema.extend({
-  RESEND_API_KEY: z.string().startsWith('re_', 'RESEND_API_KEY must start with "re_"'),
-  EMAIL_FROM: z
-    .string()
-    .min(3)
-    .refine((value) => value.includes('@'), {
-      message: 'EMAIL_FROM must contain an email address, e.g. "MailQueue <onboarding@resend.dev>"',
-    }),
-  WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(2),
+  RESEND_API_KEY: resendApiKey,
+  EMAIL_FROM: emailFrom,
+  WORKER_CONCURRENCY: workerConcurrency,
 });
 
 export type BaseConfig = Readonly<z.infer<typeof BaseSchema>>;

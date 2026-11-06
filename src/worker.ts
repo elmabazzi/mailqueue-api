@@ -4,18 +4,12 @@
  */
 import { config as loadDotenv } from 'dotenv';
 
-import {
-  createDeadLetterHandler,
-  createSendEmailHandler,
-} from './api/workers/sendEmail.handler.js';
 import { ConfigError, parseWorkerConfig } from './config/env.js';
 import { createDbPool } from './data/db.js';
-import { ResendEmailProvider } from './data/providers/resend.provider.js';
 import { createQueueClient, PgBossEmailQueue } from './data/queue/emailQueue.js';
-import { PgEmailJobRepository } from './data/repositories/emailJob.repository.js';
 import { createLogger } from './lib/logger.js';
 import { exitOnFatalErrors, onShutdown } from './lib/shutdown.js';
-import { EmailDeliveryService } from './services/emailDelivery.service.js';
+import { startEmailWorker } from './startEmailWorker.js';
 
 loadDotenv({ quiet: true });
 
@@ -45,19 +39,14 @@ async function main(): Promise<void> {
   );
   await queue.start();
 
-  const deliveryService = new EmailDeliveryService({
-    repository: new PgEmailJobRepository(pool),
-    provider: new ResendEmailProvider({ apiKey: config.RESEND_API_KEY, from: config.EMAIL_FROM }),
+  await startEmailWorker({
+    pool,
+    queue,
     logger,
+    resendApiKey: config.RESEND_API_KEY,
+    emailFrom: config.EMAIL_FROM,
+    concurrency: config.WORKER_CONCURRENCY,
   });
-
-  await queue.consume(
-    {
-      onSendEmail: createSendEmailHandler({ deliveryService, logger }),
-      onDeadLetter: createDeadLetterHandler({ deliveryService, logger }),
-    },
-    config.WORKER_CONCURRENCY,
-  );
   logger.info(
     {
       concurrency: config.WORKER_CONCURRENCY,

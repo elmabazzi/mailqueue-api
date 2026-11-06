@@ -1,6 +1,12 @@
-# Render Blueprint: creates the database, the API (web service) and the worker in one step.
+# Render Blueprint (free plan): one PostgreSQL database + one web service.
+# The web service runs the HTTP API AND the email worker (RUN_WORKER_IN_API=true),
+# because Render's free plan has no Background Workers.
+#
 # Render dashboard -> New -> Blueprint -> select this repository.
 # Secrets marked `sync: false` are entered in the dashboard; they are never stored in git.
+#
+# To run the worker as its own service instead (paid "starter" plan), see the
+# commented-out block at the end and set RUN_WORKER_IN_API to "false".
 
 databases:
   - name: mailqueue-db
@@ -11,14 +17,13 @@ databases:
     ipAllowList: []
 
 services:
-  # ---------------- HTTP API ----------------
   - type: web
     name: mailqueue-api
     runtime: node
     plan: free
     # --include=dev: TypeScript is a devDependency and is needed to build.
     buildCommand: npm ci --include=dev && npm run build
-    # Apply pending database migrations, then start the API.
+    # Apply pending database migrations, then start the API (+ embedded worker).
     startCommand: npm run migrate && npm start
     healthCheckPath: /health
     envVars:
@@ -32,27 +37,8 @@ services:
           property: connectionString
       - key: API_KEY
         generateValue: true
-      - key: EMAIL_MAX_RETRIES
-        value: '3'
-      - key: EMAIL_RETRY_DELAY_SECONDS
-        value: '30'
-
-  # ---------------- Background worker ----------------
-  - type: worker
-    name: mailqueue-worker
-    runtime: node
-    plan: starter # background workers are not available on the free plan
-    buildCommand: npm ci --include=dev && npm run build
-    startCommand: npm run start:worker
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: NODE_VERSION
-        value: '22'
-      - key: DATABASE_URL
-        fromDatabase:
-          name: mailqueue-db
-          property: connectionString
+      - key: RUN_WORKER_IN_API
+        value: 'true'
       - key: EMAIL_MAX_RETRIES
         value: '3'
       - key: EMAIL_RETRY_DELAY_SECONDS
@@ -61,3 +47,28 @@ services:
         sync: false
       - key: EMAIL_FROM
         sync: false
+
+  # Optional separate worker (paid plan). Uncomment, and set RUN_WORKER_IN_API to 'false' above.
+  # - type: worker
+  #   name: mailqueue-worker
+  #   runtime: node
+  #   plan: starter
+  #   buildCommand: npm ci --include=dev && npm run build
+  #   startCommand: npm run start:worker
+  #   envVars:
+  #     - key: NODE_ENV
+  #       value: production
+  #     - key: NODE_VERSION
+  #       value: '22'
+  #     - key: DATABASE_URL
+  #       fromDatabase:
+  #         name: mailqueue-db
+  #         property: connectionString
+  #     - key: EMAIL_MAX_RETRIES
+  #       value: '3'
+  #     - key: EMAIL_RETRY_DELAY_SECONDS
+  #       value: '30'
+  #     - key: RESEND_API_KEY
+  #       sync: false
+  #     - key: EMAIL_FROM
+  #       sync: false

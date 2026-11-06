@@ -147,10 +147,17 @@ every layer and connect them (dependency injection).
 Services throw **domain errors** (for example `EmailJobNotFoundError`). Only the api layer's error
 handler turns them into HTTP status codes (`404`), so services stay free of HTTP concerns.
 
-**Monolith, two processes.** It is one codebase and one repository. It starts in two modes:
-`npm start` runs the HTTP API and `npm run start:worker` runs the email worker. On Render they
-are two services that share the code and the database. This lets the API stay fast even when Resend
-is slow, and lets the worker be restarted or scaled on its own.
+**Monolith, one or two processes.** It is one codebase and one repository, with the API and the
+worker kept apart in the code. They can be run in two ways:
+
+| Mode                   | How                                                 | When to use                                                                                   |
+| ---------------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **Separate processes** | `npm start` (API) + `npm run start:worker` (worker) | The API stays fast even when Resend is slow; the worker can be scaled or restarted on its own |
+| **Single process**     | `npm start` with `RUN_WORKER_IN_API=true`           | One service instead of two, e.g. on hosting plans without background workers                  |
+
+Both modes use the same worker code (`src/startEmailWorker.ts`), and either way the HTTP endpoints
+only enqueue jobs; they never send email themselves. **The deployed app uses the single-process
+mode** so that it runs entirely on Render's free plan.
 
 ## Project structure
 
@@ -258,21 +265,25 @@ dashboard in production). Each process validates its variables at startup and st
 message if one is missing or invalid. Error messages never print the value, because values can be
 secrets.
 
-| Variable                    | Used by     | Required          | Default       | Description                                                      |
-| --------------------------- | ----------- | ----------------- | ------------- | ---------------------------------------------------------------- |
-| `DATABASE_URL`              | API, worker | **yes**           |               | PostgreSQL URL `postgres://user:password@host:5432/db`           |
-| `NODE_ENV`                  | both        | no                | `development` | `development`, `test` or `production`                            |
-| `LOG_LEVEL`                 | both        | no                | `info`        | `fatal` `error` `warn` `info` `debug` `trace` `silent`           |
-| `DATABASE_SSL`              | both        | no                | `false`       | Use TLS to the database (needed over the public internet)        |
-| `DATABASE_POOL_MAX`         | API         | no                | `10`          | Maximum database connections                                     |
-| `EMAIL_MAX_RETRIES`         | both        | no                | `3`           | Retries after the first failed attempt (3 to 10)                 |
-| `EMAIL_RETRY_DELAY_SECONDS` | both        | no                | `10`          | First retry delay; doubles each retry                            |
-| `PORT`                      | API         | no                | `3000`        | HTTP port (Render sets it automatically)                         |
-| `API_KEY`                   | API         | **in production** |               | Clients send it as `X-API-Key` to use `/emails` (16+ characters) |
-| `RESEND_API_KEY`            | worker      | **yes**           |               | Resend API key (starts with `re_`)                               |
-| `EMAIL_FROM`                | worker      | **yes**           |               | Sender, e.g. `MailQueue <onboarding@resend.dev>`                 |
-| `WORKER_CONCURRENCY`        | worker      | no                | `2`           | Emails sent in parallel                                          |
-| `TEST_DATABASE_URL`         | tests       | for tests         |               | Test database (name must end with `_test`)                       |
+| Variable                    | Used by     | Required          | Default       | Description                                                               |
+| --------------------------- | ----------- | ----------------- | ------------- | ------------------------------------------------------------------------- |
+| `DATABASE_URL`              | API, worker | **yes**           |               | PostgreSQL URL `postgres://user:password@host:5432/db`                    |
+| `NODE_ENV`                  | both        | no                | `development` | `development`, `test` or `production`                                     |
+| `LOG_LEVEL`                 | both        | no                | `info`        | `fatal` `error` `warn` `info` `debug` `trace` `silent`                    |
+| `DATABASE_SSL`              | both        | no                | `false`       | Use TLS to the database (needed over the public internet)                 |
+| `DATABASE_POOL_MAX`         | API         | no                | `10`          | Maximum database connections                                              |
+| `EMAIL_MAX_RETRIES`         | both        | no                | `3`           | Retries after the first failed attempt (3 to 10)                          |
+| `EMAIL_RETRY_DELAY_SECONDS` | both        | no                | `10`          | First retry delay; doubles each retry                                     |
+| `PORT`                      | API         | no                | `3000`        | HTTP port (Render sets it automatically)                                  |
+| `API_KEY`                   | API         | **in production** |               | Clients send it as `X-API-Key` to use `/emails` (16+ characters)          |
+| `RUN_WORKER_IN_API`         | API         | no                | `false`       | `true` = the API process also runs the email worker (single-service mode) |
+| `RESEND_API_KEY`            | worker\*    | **yes**\*         |               | Resend API key (starts with `re_`)                                        |
+| `EMAIL_FROM`                | worker\*    | **yes**\*         |               | Sender, e.g. `MailQueue <onboarding@resend.dev>`                          |
+| `WORKER_CONCURRENCY`        | worker\*    | no                | `2`           | Emails sent in parallel                                                   |
+
+\* Needed by whichever process runs the worker: the worker process, or the API when
+`RUN_WORKER_IN_API=true`. The API refuses to start if the flag is on and these are missing.
+| `TEST_DATABASE_URL` | tests | for tests | | Test database (name must end with `_test`) |
 
 `.env` is listed in `.gitignore` and is never committed. [`.env.example`](.env.example) lists every
 variable with placeholder values only.
@@ -477,13 +488,18 @@ refuses to run them against any database whose name does not end in `_test`.
 
 ## Deployment on Render
 
-The repository includes a [Render Blueprint](render.yaml) that creates three resources:
+The repository includes a [Render Blueprint](render.yaml) that creates two resources, both on
+Render's **free plan**:
 
-| Resource           | Type                                     | Start command                  |
-| ------------------ | ---------------------------------------- | ------------------------------ |
-| `mailqueue-db`     | PostgreSQL                               |                                |
-| `mailqueue-api`    | Web Service (`healthCheckPath: /health`) | `npm run migrate && npm start` |
-| `mailqueue-worker` | Background Worker                        | `npm run start:worker`         |
+| Resource        | Type                                     | Start command                  |
+| --------------- | ---------------------------------------- | ------------------------------ |
+| `mailqueue-db`  | PostgreSQL                               |                                |
+| `mailqueue-api` | Web Service (`healthCheckPath: /health`) | `npm run migrate && npm start` |
+
+The web service runs with `RUN_WORKER_IN_API=true`, so it serves the API **and** processes the
+email queue. Free Render plans have no Background Workers; to use a separate worker service on a
+paid plan instead, uncomment the worker block at the end of `render.yaml` and set
+`RUN_WORKER_IN_API` to `false`.
 
 Steps:
 
@@ -493,8 +509,8 @@ Steps:
 3. When asked, enter the secrets that are not stored in git:
    - `RESEND_API_KEY`: your Resend key
    - `EMAIL_FROM`: e.g. `MailQueue <onboarding@resend.dev>`
-4. Click **Apply**. Render creates the database, builds both services, and the API runs the
-   migrations before it starts.
+4. Click **Apply**. Render creates the database, builds the service, and runs the migrations
+   before the API starts.
 5. `API_KEY` is generated automatically. Copy it from **mailqueue-api → Environment**; clients
    need it in the `X-API-Key` header.
 6. Open `https://<your-service>.onrender.com/health`. It should return `200` with
@@ -506,11 +522,11 @@ Notes:
   the database also refuses connections from the internet (`ipAllowList: []`).
 - The build uses `npm ci --include=dev` because TypeScript is a dev dependency and is needed for
   `npm run build`, even though `NODE_ENV=production`.
-- Render sends `SIGTERM` on every deploy. Both processes shut down gracefully: the API finishes
-  open requests and the worker finishes in-progress emails.
-- Background Workers are a paid Render instance type (`starter`). The web service and database use
-  the free plan. Free web services sleep after a period of no traffic and take a few seconds to
-  wake up; regular monitoring checks keep the service awake.
+- Render sends `SIGTERM` on every deploy. The service shuts down gracefully: it finishes open
+  requests and in-progress emails first.
+- Free web services sleep after a period of no traffic and take a few seconds to wake up. While
+  the service sleeps, the embedded worker sleeps too; queued emails stay safely in PostgreSQL and
+  are sent when it wakes up. Regular monitoring checks keep the service awake.
 
 ## Monitoring with Asniher
 

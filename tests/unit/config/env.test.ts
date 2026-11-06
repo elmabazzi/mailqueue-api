@@ -118,6 +118,42 @@ describe('parseApiConfig', () => {
   it('returns a read-only object', () => {
     expect(Object.isFrozen(parseApiConfig({ DATABASE_URL: DB }))).toBe(true);
   });
+
+  describe('RUN_WORKER_IN_API (single-service mode)', () => {
+    it('is off by default and then needs no Resend settings', () => {
+      const config = parseApiConfig({ DATABASE_URL: DB });
+      expect(config.RUN_WORKER_IN_API).toBe(false);
+      expect(config.RESEND_API_KEY).toBeUndefined();
+    });
+
+    it('requires RESEND_API_KEY and EMAIL_FROM when turned on', () => {
+      const attempt = () => parseApiConfig({ DATABASE_URL: DB, RUN_WORKER_IN_API: 'true' });
+      expect(attempt).toThrow(/RESEND_API_KEY is required when RUN_WORKER_IN_API=true/);
+      expect(attempt).toThrow(/EMAIL_FROM is required when RUN_WORKER_IN_API=true/);
+    });
+
+    it('accepts a complete single-service configuration', () => {
+      const config = parseApiConfig({
+        DATABASE_URL: DB,
+        RUN_WORKER_IN_API: 'true',
+        RESEND_API_KEY: 're_test_123',
+        EMAIL_FROM: 'MailQueue <onboarding@resend.dev>',
+        WORKER_CONCURRENCY: '3',
+      });
+      expect(config).toMatchObject({ RUN_WORKER_IN_API: true, WORKER_CONCURRENCY: 3 });
+    });
+
+    it('still validates the Resend key format when the worker is embedded', () => {
+      expect(() =>
+        parseApiConfig({
+          DATABASE_URL: DB,
+          RUN_WORKER_IN_API: 'true',
+          RESEND_API_KEY: 'not-a-resend-key',
+          EMAIL_FROM: 'a@b.co',
+        }),
+      ).toThrow(/must start with "re_"/);
+    });
+  });
 });
 
 describe('parseWorkerConfig', () => {

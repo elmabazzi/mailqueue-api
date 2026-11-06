@@ -16,6 +16,7 @@ import { createLogger } from './lib/logger.js';
 import { exitOnFatalErrors, onShutdown } from './lib/shutdown.js';
 import { EmailService } from './services/email.service.js';
 import { HealthService } from './services/health.service.js';
+import { startEmailWorker } from './startEmailWorker.js';
 
 loadDotenv({ quiet: true });
 
@@ -25,11 +26,14 @@ async function main(): Promise<void> {
   const logger = createLogger({ name: 'mailqueue-api', level: config.LOG_LEVEL });
   exitOnFatalErrors(logger);
 
+  const embeddedWorker = config.RUN_WORKER_IN_API;
+
   const pool = createDbPool(
     {
       connectionString: config.DATABASE_URL,
       ssl: config.DATABASE_SSL,
-      max: config.DATABASE_POOL_MAX,
+      // The embedded worker needs extra connections for the emails it sends in parallel.
+      max: config.DATABASE_POOL_MAX + (embeddedWorker ? config.WORKER_CONCURRENCY : 0),
       applicationName: 'mailqueue-api',
     },
     (error) => logger.error({ err: error }, 'PostgreSQL pool error'),
@@ -39,7 +43,7 @@ async function main(): Promise<void> {
     createQueueClient({
       connectionString: config.DATABASE_URL,
       ssl: config.DATABASE_SSL,
-      role: 'producer',
+      role: embeddedWorker ? 'worker' : 'producer',
       onError: (error) => logger.error({ err: error }, 'Queue error'),
     }),
     { retryLimit: config.EMAIL_MAX_RETRIES, retryDelaySeconds: config.EMAIL_RETRY_DELAY_SECONDS },
@@ -62,6 +66,21 @@ async function main(): Promise<void> {
     logger.warn('API_KEY is not set: /emails endpoints are open (allowed outside production only)');
   }
 
+  if (embeddedWorker && config.RESEND_API_KEY && config.EMAIL_FROM) {
+    await startEmailWorker({
+      pool,
+      queue,
+      logger,
+      resendApiKey: config.RESEND_API_KEY,
+      emailFrom: config.EMAIL_FROM,
+      concurrency: config.WORKER_CONCURRENCY,
+    });
+    logger.info(
+      { concurrency: config.WORKER_CONCURRENCY, maxRetries: config.EMAIL_MAX_RETRIES },
+      'Email worker running inside the API process (RUN_WORKER_IN_API=true)',
+    );
+  }
+
   const app = createApp({ emailService, healthService, logger, apiKey: config.API_KEY });
   const server = app.listen(config.PORT, '0.0.0.0', () => {
     logger.info({ port: config.PORT, env: config.NODE_ENV }, 'MailQueue API listening');
@@ -69,7 +88,7 @@ async function main(): Promise<void> {
 
   onShutdown(logger, async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    await queue.stop();
+    await queue.stop(); // with the embedded worker, also waits for in-progress emails
     await pool.end();
   });
 }
